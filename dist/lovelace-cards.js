@@ -178,7 +178,7 @@ customElements.define("light-panel-card-editor", LightPanelCardEditor);
 
 window.customCards = window.customCards || [];
 window.customCards.push({
-  type: "light-panel-card",
+  type: "custom:light-panel-card",
   name: "Light Panel Card",
   description: "Light control panel card",
 });
