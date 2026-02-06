@@ -21,7 +21,7 @@ const plugins = [
 export default {
   input: "src/panel-cards.ts",
   output: {
-    file: "dist/panel-cards.js",
+    file: "dist/lovelace-cards.js",
     format: "es",
     inlineDynamicImports: true,
   },
