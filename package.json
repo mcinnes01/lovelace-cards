@@ -1,0 +1,21 @@
+{
+  "name": "lovelace-panel-cards",
+  "version": "1.0.0",
+  "description": "Control panel cards for Home Assistant",
+  "main": "dist/panel-cards.js",
+  "scripts": {
+    "build": "rollup -c",
+    "watch": "rollup -c -w"
+  },
+  "keywords": ["home-assistant", "lovelace", "cards"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^25.0.0",
+    "@rollup/plugin-node-resolve": "^15.0.0",
+    "@rollup/plugin-typescript": "^11.0.0",
+    "rollup": "^4.0.0",
+    "rollup-plugin-terser": "^7.0.0",
+    "typescript": "^5.0.0"
+  }
+}
