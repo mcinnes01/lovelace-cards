@@ -1,4 +1,4 @@
-# Lovelace Panel Cards
+# Lovelace Cards
 
 Control panel cards for Home Assistant with proper entity selection UI. Includes light control, blinds control, climate control, and media player control panels.
 
@@ -8,8 +8,8 @@ Control panel cards for Home Assistant with proper entity selection UI. Includes
 1. Go to HACS > Frontend
 2. Click the three dots menu
 3. Select "Custom repositories"
-4. Add: `https://github.com/mcinnes01/lovelace-panel-cards`
-5. Search for "Panel Cards" and install
+4. Add: `https://github.com/mcinnes01/lovelace-cards`
+5. Search for "Lovelace Cards" and install
 
 ### Manual Installation
 1. Download the latest release
