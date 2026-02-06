@@ -6,12 +6,17 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -30,3 +35,19 @@ jobs:
         with:
           commit_message: "chore: update dist"
           file_pattern: dist/lovelace-cards.js
+
+      - name: Tag release (YYYY.M.increment)
+        run: |
+          git fetch --tags
+          DATE_VER=$(date -u +"%Y.%m")
+          LAST_TAG=$(git tag --list "${DATE_VER}.*" --sort=version:refname | tail -n 1)
+          if [ -z "$LAST_TAG" ]; then
+            NEXT_INC=1
+          else
+            LAST_INC=${LAST_TAG##*.}
+            NEXT_INC=$((LAST_INC + 1))
+          fi
+          NEW_TAG="${DATE_VER}.${NEXT_INC}"
+          echo "Tagging ${NEW_TAG}"
+          git tag "${NEW_TAG}"
+          git push origin "${NEW_TAG}"
