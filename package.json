@@ -1,21 +1,26 @@
 {
-  "name": "lovelace-panel-cards",
+  "name": "lovelace-cards",
   "version": "1.0.0",
-  "description": "Control panel cards for Home Assistant",
-  "main": "dist/panel-cards.js",
+  "description": "Panel cards for Home Assistant",
   "scripts": {
-    "build": "rollup -c",
-    "watch": "rollup -c -w"
+    "build": "rollup -c --bundleConfigAsCjs"
   },
-  "keywords": ["home-assistant", "lovelace", "cards"],
   "author": "",
   "license": "MIT",
+  "dependencies": {
+    "lit": "^3.3.1",
+    "home-assistant-js-websocket": "^9.5.0"
+  },
   "devDependencies": {
-    "@rollup/plugin-commonjs": "^25.0.0",
-    "@rollup/plugin-node-resolve": "^15.0.0",
-    "@rollup/plugin-typescript": "^11.0.0",
-    "rollup": "^4.0.0",
-    "rollup-plugin-terser": "^7.0.0",
-    "typescript": "^5.0.0"
+    "@babel/core": "^7.28.4",
+    "@babel/preset-env": "^7.28.3",
+    "@rollup/plugin-babel": "^6.0.4",
+    "@rollup/plugin-commonjs": "^28.0.6",
+    "@rollup/plugin-json": "^6.1.0",
+    "@rollup/plugin-node-resolve": "^16.0.1",
+    "@rollup/plugin-terser": "^0.4.4",
+    "@rollup/plugin-typescript": "^12.1.4",
+    "rollup": "^4.50.1",
+    "typescript": "^5.9.2"
   }
 }

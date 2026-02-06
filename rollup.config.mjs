@@ -1,19 +1,29 @@
-import resolve from "@rollup/plugin-node-resolve";
-import typescript from "@rollup/plugin-typescript";
+import { getBabelInputPlugin, getBabelOutputPlugin } from "@rollup/plugin-babel";
 import commonjs from "@rollup/plugin-commonjs";
-import { terser } from "rollup-plugin-terser";
+import json from "@rollup/plugin-json";
+import nodeResolve from "@rollup/plugin-node-resolve";
+import terser from "@rollup/plugin-terser";
+import typescript from "@rollup/plugin-typescript";
+
+const plugins = [
+  typescript({ declaration: false }),
+  nodeResolve(),
+  json(),
+  commonjs(),
+  getBabelInputPlugin({ babelHelpers: "bundled" }),
+  getBabelOutputPlugin({
+    presets: [["@babel/preset-env", { modules: false }]],
+    compact: true,
+  }),
+  terser(),
+];
 
 export default {
   input: "src/panel-cards.ts",
   output: {
     file: "dist/panel-cards.js",
-    format: "iife",
+    format: "es",
+    inlineDynamicImports: true,
   },
-  plugins: [
-    resolve(),
-    commonjs(),
-    typescript({ tsconfig: false, compilerOptions: { target: "ES2020" } }),
-    terser(),
-  ],
-  external: [],
+  plugins,
 };
