@@ -8,8 +8,9 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "home-assistant-js-websocket": "^9.5.0",
     "lit": "^3.3.1",
-    "home-assistant-js-websocket": "^9.5.0"
+    "tslib": "^2.6.3"
   },
   "devDependencies": {
     "@babel/core": "^7.28.4",
