@@ -1,43 +1,77 @@
 import { html, LitElement, css, TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { LightPanelCardConfig } from "./light-panel-card-config";
+import { LightPanelCardConfig, LightPanelSectionConfig } from "./light-panel-card-config";
 
 @customElement("light-panel-card")
 export class LightPanelCard extends LitElement {
   @property({ attribute: false }) public hass?: any;
   @state() private config?: LightPanelCardConfig;
-  @state() private lights: string[] = [];
 
   public setConfig(config: LightPanelCardConfig): void {
     this.config = config;
   }
 
-  protected updated(changedProps: Map<string, any>): void {
-    super.updated(changedProps);
-    if (changedProps.has("hass") || changedProps.has("config")) {
-      this.updateLights();
-    }
+  public static getConfigElement(): HTMLElement {
+    return document.createElement("light-panel-card-editor");
   }
 
-  private updateLights(): void {
-    if (!this.hass || !this.config) return;
+  public static getStubConfig(): LightPanelCardConfig {
+    return {
+      type: "custom:light-panel-card",
+      title: "Light Control",
+      lights: { targets: {} },
+      lamps: { targets: {} },
+      accents: { targets: {} },
+      scenes: { targets: {} },
+    };
+  }
 
-    this.lights = Object.keys(this.hass.states).filter((entity) => {
-      const state = this.hass!.states[entity];
-      const domain = entity.split(".")[0];
+  public getCardSize(): number {
+    return 4;
+  }
 
-      if (domain !== "light") return false;
+  private getSectionEntities(sectionKey: keyof LightPanelCardConfig, domain: string): string[] {
+    if (!this.hass || !this.config) return [];
+    const section = (this.config[sectionKey] as LightPanelSectionConfig) || {};
+    const targets = section.targets || {};
+    const directEntities = Array.isArray(targets.entity_id)
+      ? targets.entity_id
+      : Array.isArray(section.entities)
+        ? section.entities
+        : [];
 
-      if (this.config!.entities) {
-        return this.config!.entities.includes(entity);
+    const areaIds = Array.isArray(targets.area_id)
+      ? targets.area_id
+      : section.area
+        ? [section.area]
+        : [];
+
+    const labelIds = Array.isArray(targets.label_id) ? targets.label_id : [];
+
+    if (directEntities.length === 0 && areaIds.length === 0 && labelIds.length === 0) {
+      return [];
+    }
+
+    const matched = new Set(directEntities);
+
+    Object.keys(this.hass.states).forEach((entityId) => {
+      if (!entityId.startsWith(`${domain}.`)) return;
+      const state = this.hass.states[entityId];
+      const areaId = state?.attributes?.area_id;
+      if (areaId && areaIds.includes(areaId)) {
+        matched.add(entityId);
+        return;
       }
-
-      if (this.config!.area) {
-        return state.attributes?.area_id === this.config!.area;
+      if (labelIds.length > 0) {
+        const registry = this.hass.entities?.[entityId];
+        const labels = registry?.labels || registry?.label_ids || [];
+        if (Array.isArray(labels) && labels.some((label: string) => labelIds.includes(label))) {
+          matched.add(entityId);
+        }
       }
-
-      return false;
     });
+
+    return Array.from(matched);
   }
 
   private toggleLight(entity: string): void {
@@ -72,19 +106,9 @@ export class LightPanelCard extends LitElement {
     });
   }
 
-  public static getConfigElement(): HTMLElement {
-    return document.createElement("light-panel-card-editor");
-  }
-
-  public static getStubConfig(): LightPanelCardConfig {
-    return {
-      type: "custom:light-panel-card",
-      area: "",
-    };
-  }
-
-  public getCardSize(): number {
-    return 4;
+  private activateScene(entity: string): void {
+    if (!this.hass) return;
+    this.hass.callService("scene", "turn_on", { entity_id: entity });
   }
 
   protected render(): TemplateResult {
@@ -93,16 +117,54 @@ export class LightPanelCard extends LitElement {
     }
 
     const title = this.config.title || "Light Control";
+    const lightEntities = this.getSectionEntities("lights", "light");
+    const lampEntities = this.getSectionEntities("lamps", "light");
+    const accentEntities = this.getSectionEntities("accents", "light");
+    const sceneEntities = this.getSectionEntities("scenes", "scene");
 
     return html`
       <ha-card>
         <div class="card-content">
           <h2>${title}</h2>
-          <div class="lights-container">
-            ${this.lights.map((entity) => this.renderLight(entity))}
-          </div>
+          ${this.renderLightSection("Lights", lightEntities)}
+          ${this.renderLightSection("Lamps", lampEntities)}
+          ${this.renderLightSection("Accents", accentEntities)}
+          ${this.renderSceneSection("Scenes", sceneEntities)}
         </div>
       </ha-card>
+    `;
+  }
+
+  private renderLightSection(title: string, entities: string[]): TemplateResult {
+    if (!entities.length) return html``;
+    return html`
+      <div class="section">
+        <h3>${title}</h3>
+        <div class="lights-container">
+          ${entities.map((entity) => this.renderLight(entity))}
+        </div>
+      </div>
+    `;
+  }
+
+  private renderSceneSection(title: string, entities: string[]): TemplateResult {
+    if (!entities.length) return html``;
+    return html`
+      <div class="section">
+        <h3>${title}</h3>
+        <div class="scene-buttons">
+          ${entities.map((entity) => this.renderScene(entity))}
+        </div>
+      </div>
+    `;
+  }
+
+  private renderScene(entity: string): TemplateResult {
+    const state = this.hass!.states[entity];
+    const name = state?.attributes?.friendly_name || entity;
+
+    return html`
+      <button @click="${() => this.activateScene(entity)}">${name}</button>
     `;
   }
 
@@ -166,6 +228,12 @@ export class LightPanelCard extends LitElement {
     h2 {
       margin: 0 0 16px 0;
     }
+    h3 {
+      margin: 12px 0 8px 0;
+    }
+    .section {
+      margin-bottom: 16px;
+    }
     .lights-container {
       display: flex;
       flex-direction: column;
@@ -195,6 +263,11 @@ export class LightPanelCard extends LitElement {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(60px, 1fr));
       gap: 4px;
+    }
+    .scene-buttons {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 6px;
     }
     button {
       padding: 8px 12px;

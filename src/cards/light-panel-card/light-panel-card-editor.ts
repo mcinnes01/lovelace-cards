@@ -1,6 +1,6 @@
 import { html, LitElement, css, TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { LightPanelCardConfig } from "./light-panel-card-config";
+import { LightPanelCardConfig, TargetSelectorValue } from "./light-panel-card-config";
 
 @customElement("light-panel-card-editor")
 export class LightPanelCardEditor extends LitElement {
@@ -11,10 +11,7 @@ export class LightPanelCardEditor extends LitElement {
     this.config = config;
   }
 
-  private handleChange(ev: Event, key: string): void {
-    const target = ev.target as HTMLInputElement | HTMLSelectElement;
-    const config = { ...this.config, [key]: target.value };
-    
+  private fireConfigChanged(config: LightPanelCardConfig): void {
     const event = new CustomEvent("config-changed", {
       detail: { config },
       bubbles: true,
@@ -23,16 +20,32 @@ export class LightPanelCardEditor extends LitElement {
     this.dispatchEvent(event);
   }
 
+  private updateTitle(ev: Event): void {
+    const target = ev.target as HTMLInputElement;
+    const config = { ...this.config, title: target.value } as LightPanelCardConfig;
+    this.fireConfigChanged(config);
+  }
+
+  private updateTargets(sectionKey: keyof LightPanelCardConfig, value: TargetSelectorValue): void {
+    const config = {
+      ...this.config,
+      [sectionKey]: {
+        ...(this.config?.[sectionKey] || {}),
+        targets: value || {},
+      },
+    } as LightPanelCardConfig;
+    this.fireConfigChanged(config);
+  }
+
   protected render(): TemplateResult {
     if (!this.hass || !this.config) return html``;
 
-    const areas = Array.from(
-      new Set(
-        Object.values(this.hass.states)
-          .map((state: any) => state.attributes?.area_id)
-          .filter(Boolean)
-      )
-    ) as string[];
+    const sections = [
+      { key: "lights", label: "Light Targets", domain: "light" },
+      { key: "lamps", label: "Lamp Targets", domain: "light" },
+      { key: "accents", label: "Accent Targets", domain: "light" },
+      { key: "scenes", label: "Scene Targets", domain: "scene" },
+    ] as const;
 
     return html`
       <div class="editor">
@@ -41,17 +54,30 @@ export class LightPanelCardEditor extends LitElement {
           <input
             type="text"
             .value="${this.config.title || "Light Control"}"
-            @change="${(e: Event) => this.handleChange(e, "title")}"
+            @change="${this.updateTitle}"
           />
         </div>
 
-        <div class="form-group">
-          <label>Select Area</label>
-          <select @change="${(e: Event) => this.handleChange(e, "area")}">
-            <option value="">Choose area...</option>
-            ${areas.map((area) => html`<option value="${area}" ?selected="${area === this.config?.area}">${area}</option>`)}
-          </select>
-        </div>
+        ${sections.map(
+          (section) => html`
+            <div class="form-group">
+              <label>${section.label}</label>
+              <ha-selector
+                .hass="${this.hass}"
+                .selector="${{
+                  target: {
+                    entity: { domain: section.domain },
+                    area: {},
+                    label: {},
+                  },
+                }}"
+                .value="${(this.config?.[section.key]?.targets as TargetSelectorValue) || {}}"
+                @value-changed="${(ev: CustomEvent) =>
+                  this.updateTargets(section.key, (ev.detail?.value as TargetSelectorValue) || {})}"
+              ></ha-selector>
+            </div>
+          `
+        )}
       </div>
     `;
   }
@@ -72,7 +98,13 @@ export class LightPanelCardEditor extends LitElement {
       font-weight: 500;
     }
     input,
-    select {
+    ha-selector {
+      width: 100%;
+    }
+    ha-selector {
+      display: block;
+    }
+    input {
       padding: 8px;
       border: 1px solid var(--divider-color);
       border-radius: 4px;
