@@ -8,7 +8,23 @@ export class LightPanelCardEditor extends LitElement {
   @state() private config?: LightPanelCardConfig;
 
   public setConfig(config: LightPanelCardConfig): void {
-    this.config = config;
+    const defaults: LightPanelCardConfig = {
+      type: "custom:light-panel-card",
+      title: "Light Control",
+      lights: { targets: {} },
+      lamps: { targets: {} },
+      accents: { targets: {} },
+      scenes: { targets: {} },
+    };
+
+    this.config = {
+      ...defaults,
+      ...config,
+      lights: { targets: {}, ...config?.lights },
+      lamps: { targets: {}, ...config?.lamps },
+      accents: { targets: {}, ...config?.accents },
+      scenes: { targets: {}, ...config?.scenes },
+    };
   }
 
   private fireConfigChanged(config: LightPanelCardConfig): void {
@@ -38,7 +54,7 @@ export class LightPanelCardEditor extends LitElement {
   }
 
   protected render(): TemplateResult {
-    if (!this.hass || !this.config) return html``;
+    if (!this.config) return html``;
 
     const sections = [
       { key: "lights", label: "Light Targets", domain: "light" },
