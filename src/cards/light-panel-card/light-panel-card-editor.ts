@@ -8,6 +8,10 @@ export class LightPanelCardEditor extends LitElement {
   @state() private config?: LightPanelCardConfig;
 
   public setConfig(config: LightPanelCardConfig): void {
+    this.config = config;
+  }
+
+  private getConfigWithDefaults(): LightPanelCardConfig {
     const defaults: LightPanelCardConfig = {
       type: "custom:light-panel-card",
       title: "Light Control",
@@ -17,13 +21,15 @@ export class LightPanelCardEditor extends LitElement {
       scenes: { targets: {} },
     };
 
-    this.config = {
+    if (!this.config) return defaults;
+
+    return {
       ...defaults,
-      ...config,
-      lights: { targets: {}, ...config?.lights },
-      lamps: { targets: {}, ...config?.lamps },
-      accents: { targets: {}, ...config?.accents },
-      scenes: { targets: {}, ...config?.scenes },
+      ...this.config,
+      lights: { targets: {}, ...this.config?.lights },
+      lamps: { targets: {}, ...this.config?.lamps },
+      accents: { targets: {}, ...this.config?.accents },
+      scenes: { targets: {}, ...this.config?.scenes },
     };
   }
 
@@ -38,24 +44,30 @@ export class LightPanelCardEditor extends LitElement {
 
   private updateTitle(ev: Event): void {
     const target = ev.target as HTMLInputElement;
-    const config = { ...this.config, title: target.value } as LightPanelCardConfig;
+    const config = { ...this.getConfigWithDefaults(), title: target.value };
+    this.config = config;
     this.fireConfigChanged(config);
   }
 
   private updateTargets(sectionKey: keyof LightPanelCardConfig, value: TargetSelectorValue): void {
+    const currentConfig = this.getConfigWithDefaults();
     const config = {
-      ...this.config,
+      ...currentConfig,
       [sectionKey]: {
-        ...(this.config?.[sectionKey] || {}),
+        ...(currentConfig?.[sectionKey] || {}),
         targets: value || {},
       },
     } as LightPanelCardConfig;
+    this.config = config;
     this.fireConfigChanged(config);
   }
 
   protected render(): TemplateResult {
-    if (!this.config) return html`<div>Loading configuration...</div>`;
-    if (!this.hass) return html`<div>Waiting for Home Assistant connection...</div>`;
+    if (!this.hass) {
+      return html`<div>Waiting for Home Assistant connection...</div>`;
+    }
+
+    const config = this.getConfigWithDefaults();
 
     const sections = [
       { key: "lights", label: "Light Targets", domain: "light" },
@@ -70,7 +82,7 @@ export class LightPanelCardEditor extends LitElement {
           <label>Title</label>
           <input
             type="text"
-            .value="${this.config.title || "Light Control"}"
+            .value="${config.title || "Light Control"}"
             @change="${this.updateTitle}"
           />
         </div>
@@ -88,7 +100,7 @@ export class LightPanelCardEditor extends LitElement {
                     label: {},
                   },
                 }}"
-                .value="${(this.config?.[section.key]?.targets as TargetSelectorValue) || {}}"
+                .value="${(config?.[section.key]?.targets as TargetSelectorValue) || {}}"
                 @value-changed="${(ev: CustomEvent) =>
                   this.updateTargets(section.key, (ev.detail?.value as TargetSelectorValue) || {})}"
               ></ha-selector>
@@ -116,7 +128,8 @@ export class LightPanelCardEditor extends LitElement {
     }
     input,
     ha-selector {
-      width: 100%;}
+      width: 100%;
+    }
     ha-selector {
       display: block;
     }
