@@ -1,17 +1,33 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "[0-9]*.[0-9]*.[0-9]*"
+  workflow_run:
+    workflows: ["Build dist"]
+    types:
+      - completed
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   release:
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch tags
+        run: git fetch --tags
+
+      - name: Determine latest tag
+        id: tag
+        run: |
+          LATEST_TAG=$(git tag --sort=version:refname | tail -n 1)
+          echo "latest_tag=${LATEST_TAG}" >> $GITHUB_OUTPUT
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -28,5 +44,6 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.tag.outputs.latest_tag }}
           files: |
             dist/lovelace-cards.js
