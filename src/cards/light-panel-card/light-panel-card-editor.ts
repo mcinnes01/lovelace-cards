@@ -7,7 +7,13 @@ export class LightPanelCardEditor extends LitElement {
   @property({ attribute: false }) public hass?: any;
   @state() private config?: LightPanelCardConfig;
 
+  constructor() {
+    super();
+    console.log("[LightPanelCardEditor] Constructor called");
+  }
+
   public setConfig(config: LightPanelCardConfig): void {
+    console.log("[LightPanelCardEditor] setConfig called with:", config);
     this.config = config;
   }
 
@@ -63,6 +69,7 @@ export class LightPanelCardEditor extends LitElement {
   }
 
   protected render(): TemplateResult {
+    console.log("[LightPanelCardEditor] render() called, hass:", !!this.hass, "config:", !!this.config);
     const config = this.getConfigWithDefaults();
 
     const sections = [
