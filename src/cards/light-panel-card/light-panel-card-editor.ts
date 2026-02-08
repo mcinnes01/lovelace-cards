@@ -54,7 +54,8 @@ export class LightPanelCardEditor extends LitElement {
   }
 
   protected render(): TemplateResult {
-    if (!this.config) return html``;
+    if (!this.config) return html`<div>Loading configuration...</div>`;
+    if (!this.hass) return html`<div>Waiting for Home Assistant connection...</div>`;
 
     const sections = [
       { key: "lights", label: "Light Targets", domain: "light" },
@@ -115,8 +116,7 @@ export class LightPanelCardEditor extends LitElement {
     }
     input,
     ha-selector {
-      width: 100%;
-    }
+      width: 100%;}
     ha-selector {
       display: block;
     }
