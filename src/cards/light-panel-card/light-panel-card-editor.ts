@@ -63,10 +63,6 @@ export class LightPanelCardEditor extends LitElement {
   }
 
   protected render(): TemplateResult {
-    if (!this.hass) {
-      return html`<div>Waiting for Home Assistant connection...</div>`;
-    }
-
     const config = this.getConfigWithDefaults();
 
     const sections = [
@@ -87,7 +83,9 @@ export class LightPanelCardEditor extends LitElement {
           />
         </div>
 
-        ${sections.map(
+        ${!this.hass ? html`<div style="padding: 8px; color: var(--warning-color);">Home Assistant not connected yet</div>` : ""}
+
+        ${this.hass ? sections.map(
           (section) => html`
             <div class="form-group">
               <label>${section.label}</label>
@@ -106,7 +104,7 @@ export class LightPanelCardEditor extends LitElement {
               ></ha-selector>
             </div>
           `
-        )}
+        ) : ""}
       </div>
     `;
   }
