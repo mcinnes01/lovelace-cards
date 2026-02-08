@@ -7,36 +7,8 @@ export class LightPanelCardEditor extends LitElement {
   @property({ attribute: false }) public hass?: any;
   @state() private config?: LightPanelCardConfig;
 
-  constructor() {
-    super();
-    console.log("[LightPanelCardEditor] Constructor called");
-  }
-
   public setConfig(config: LightPanelCardConfig): void {
-    console.log("[LightPanelCardEditor] setConfig called with:", config);
     this.config = config;
-  }
-
-  private getConfigWithDefaults(): LightPanelCardConfig {
-    const defaults: LightPanelCardConfig = {
-      type: "custom:light-panel-card",
-      title: "Light Control",
-      lights: { targets: {} },
-      lamps: { targets: {} },
-      accents: { targets: {} },
-      scenes: { targets: {} },
-    };
-
-    if (!this.config) return defaults;
-
-    return {
-      ...defaults,
-      ...this.config,
-      lights: { targets: {}, ...this.config?.lights },
-      lamps: { targets: {}, ...this.config?.lamps },
-      accents: { targets: {}, ...this.config?.accents },
-      scenes: { targets: {}, ...this.config?.scenes },
-    };
   }
 
   private fireConfigChanged(config: LightPanelCardConfig): void {
@@ -50,17 +22,16 @@ export class LightPanelCardEditor extends LitElement {
 
   private updateTitle(ev: Event): void {
     const target = ev.target as HTMLInputElement;
-    const config = { ...this.getConfigWithDefaults(), title: target.value };
+    const config = { ...this.config, title: target.value } as LightPanelCardConfig;
     this.config = config;
     this.fireConfigChanged(config);
   }
 
-  private updateTargets(sectionKey: keyof LightPanelCardConfig, value: TargetSelectorValue): void {
-    const currentConfig = this.getConfigWithDefaults();
+  private updateTargets(sectionKey: string, value: TargetSelectorValue): void {
     const config = {
-      ...currentConfig,
+      ...this.config,
       [sectionKey]: {
-        ...(currentConfig?.[sectionKey] || {}),
+        ...(this.config?.[sectionKey as keyof LightPanelCardConfig] || {}),
         targets: value || {},
       },
     } as LightPanelCardConfig;
@@ -69,15 +40,9 @@ export class LightPanelCardEditor extends LitElement {
   }
 
   protected render(): TemplateResult {
-    console.log("[LightPanelCardEditor] render() called, hass:", !!this.hass, "config:", !!this.config);
-    const config = this.getConfigWithDefaults();
-
-    const sections = [
-      { key: "lights", label: "Light Targets", domain: "light" },
-      { key: "lamps", label: "Lamp Targets", domain: "light" },
-      { key: "accents", label: "Accent Targets", domain: "light" },
-      { key: "scenes", label: "Scene Targets", domain: "scene" },
-    ] as const;
+    if (!this.hass || !this.config) {
+      return html`<div>Loading...</div>`;
+    }
 
     return html`
       <div class="editor">
@@ -85,33 +50,50 @@ export class LightPanelCardEditor extends LitElement {
           <label>Title</label>
           <input
             type="text"
-            .value="${config.title || "Light Control"}"
+            .value="${this.config.title || "Light Control"}"
             @change="${this.updateTitle}"
           />
         </div>
 
-        ${!this.hass ? html`<div style="padding: 8px; color: var(--warning-color);">Home Assistant not connected yet</div>` : ""}
+        <div class="form-group">
+          <label>Light Targets</label>
+          <ha-selector
+            .hass="${this.hass}"
+            .selector="${{ target: { entity: { domain: "light" }, area: {}, label: {} } }}"
+            .value="${this.config.lights?.targets || {}}"
+            @value-changed="${(ev: CustomEvent) => this.updateTargets("lights", ev.detail?.value || {})}"
+          ></ha-selector>
+        </div>
 
-        ${this.hass ? sections.map(
-          (section) => html`
-            <div class="form-group">
-              <label>${section.label}</label>
-              <ha-selector
-                .hass="${this.hass}"
-                .selector="${{
-                  target: {
-                    entity: { domain: section.domain },
-                    area: {},
-                    label: {},
-                  },
-                }}"
-                .value="${(config?.[section.key]?.targets as TargetSelectorValue) || {}}"
-                @value-changed="${(ev: CustomEvent) =>
-                  this.updateTargets(section.key, (ev.detail?.value as TargetSelectorValue) || {})}"
-              ></ha-selector>
-            </div>
-          `
-        ) : ""}
+        <div class="form-group">
+          <label>Lamp Targets</label>
+          <ha-selector
+            .hass="${this.hass}"
+            .selector="${{ target: { entity: { domain: "light" }, area: {}, label: {} } }}"
+            .value="${this.config.lamps?.targets || {}}"
+            @value-changed="${(ev: CustomEvent) => this.updateTargets("lamps", ev.detail?.value || {})}"
+          ></ha-selector>
+        </div>
+
+        <div class="form-group">
+          <label>Accent Targets</label>
+          <ha-selector
+            .hass="${this.hass}"
+            .selector="${{ target: { entity: { domain: "light" }, area: {}, label: {} } }}"
+            .value="${this.config.accents?.targets || {}}"
+            @value-changed="${(ev: CustomEvent) => this.updateTargets("accents", ev.detail?.value || {})}"
+          ></ha-selector>
+        </div>
+
+        <div class="form-group">
+          <label>Scene Targets</label>
+          <ha-selector
+            .hass="${this.hass}"
+            .selector="${{ target: { entity: { domain: "scene" }, area: {}, label: {} } }}"
+            .value="${this.config.scenes?.targets || {}}"
+            @value-changed="${(ev: CustomEvent) => this.updateTargets("scenes", ev.detail?.value || {})}"
+          ></ha-selector>
+        </div>
       </div>
     `;
   }
