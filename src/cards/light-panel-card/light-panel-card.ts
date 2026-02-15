@@ -73,6 +73,45 @@ export class LightPanelCard extends LitElement {
     return Array.isArray(val) ? val : typeof val === "string" ? [val] : [];
   }
 
+  private getEntityModes(entity: string): string[] {
+    return this.hass?.states[entity]?.attributes?.supported_color_modes || [];
+  }
+
+  /** True if entity supports anything beyond on/off (brightness, color_temp, hs, rgb, xy, etc.) */
+  private entitySupportsBrightness(entity: string): boolean {
+    const modes = this.getEntityModes(entity);
+    return modes.length > 0 && !modes.every((m: string) => m === "onoff");
+  }
+
+  private entitySupportsColorTemp(entity: string): boolean {
+    return this.getEntityModes(entity).includes("color_temp");
+  }
+
+  private entitySupportsColor(entity: string): boolean {
+    const modes = this.getEntityModes(entity);
+    return modes.includes("hs") || modes.includes("rgb") || modes.includes("xy");
+  }
+
+  /** Filter entities to only those supporting brightness */
+  private filterBrightness(entities: string[]): string[] {
+    return entities.filter((e) => this.entitySupportsBrightness(e));
+  }
+
+  /** Filter entities to only those supporting color temperature */
+  private filterColorTemp(entities: string[]): string[] {
+    return entities.filter((e) => this.entitySupportsColorTemp(e));
+  }
+
+  /** Filter entities to only those supporting RGB color */
+  private filterColor(entities: string[]): string[] {
+    return entities.filter((e) => this.entitySupportsColor(e));
+  }
+
+  /** Filter entities to only on/off-only (no brightness, no color) */
+  private filterOnOffOnly(entities: string[]): string[] {
+    return entities.filter((e) => !this.entitySupportsBrightness(e));
+  }
+
   private getSectionEntities(sectionKey: keyof LightPanelCardConfig, domain: string): string[] {
     if (!this.hass || !this.config) return [];
     const section = (this.config[sectionKey] as LightPanelSectionConfig) || {};
@@ -162,7 +201,8 @@ export class LightPanelCard extends LitElement {
   }
 
   private getAverageBrightness(entities: string[]): number {
-    const onEntities = entities.filter((e) => this.hass?.states[e]?.state === "on");
+    const capable = this.filterBrightness(entities);
+    const onEntities = capable.filter((e) => this.hass?.states[e]?.state === "on");
     if (onEntities.length === 0) return 0;
     const total = onEntities.reduce((sum, e) => {
       const br = this.hass?.states[e]?.attributes?.brightness || 0;
@@ -171,34 +211,20 @@ export class LightPanelCard extends LitElement {
     return Math.round((total / onEntities.length / 255) * 100);
   }
 
-  private supportsColorTemp(entities: string[]): boolean {
-    return entities.some((e) => {
-      const modes = this.hass?.states[e]?.attributes?.supported_color_modes || [];
-      return modes.includes("color_temp");
-    });
-  }
-
-  private supportsColor(entities: string[]): boolean {
-    return entities.some((e) => {
-      const modes = this.hass?.states[e]?.attributes?.supported_color_modes || [];
-      return modes.includes("hs") || modes.includes("rgb") || modes.includes("xy");
-    });
-  }
-
   // ─── Actions ───────────────────────────────────────────────────────
 
-  private toggleEntities(entities: string[]): void {
+  private toggleEntity(entity: string): void {
     if (!this.hass) return;
-    const anyOn = this.isAnyOn(entities);
-    const action = anyOn ? "turn_off" : "turn_on";
-    entities.forEach((entity) => {
-      this.hass!.callService("light", action, { entity_id: entity });
+    const state = this.hass.states[entity];
+    this.hass.callService("light", state?.state === "on" ? "turn_off" : "turn_on", {
+      entity_id: entity,
     });
   }
 
   private setBrightnessAll(entities: string[], brightness: number): void {
     if (!this.hass) return;
-    entities.forEach((entity) => {
+    // Only send brightness to entities that actually support it
+    this.filterBrightness(entities).forEach((entity) => {
       this.hass!.callService("light", "turn_on", {
         entity_id: entity,
         brightness: Math.round((brightness / 100) * 255),
@@ -208,29 +234,23 @@ export class LightPanelCard extends LitElement {
 
   private setColorTempAll(entities: string[], kelvin: number): void {
     if (!this.hass) return;
-    entities.forEach((entity) => {
-      const modes = this.hass?.states[entity]?.attributes?.supported_color_modes || [];
-      if (modes.includes("color_temp")) {
-        this.hass!.callService("light", "turn_on", {
-          entity_id: entity,
-          color_temp_kelvin: kelvin,
-          brightness_pct: 100,
-        });
-      }
+    this.filterColorTemp(entities).forEach((entity) => {
+      this.hass!.callService("light", "turn_on", {
+        entity_id: entity,
+        color_temp_kelvin: kelvin,
+        brightness_pct: 100,
+      });
     });
   }
 
   private setRGBAll(entities: string[], color: [number, number, number]): void {
     if (!this.hass) return;
-    entities.forEach((entity) => {
-      const modes = this.hass?.states[entity]?.attributes?.supported_color_modes || [];
-      if (modes.includes("hs") || modes.includes("rgb") || modes.includes("xy")) {
-        this.hass!.callService("light", "turn_on", {
-          entity_id: entity,
-          rgb_color: color,
-          brightness_pct: 100,
-        });
-      }
+    this.filterColor(entities).forEach((entity) => {
+      this.hass!.callService("light", "turn_on", {
+        entity_id: entity,
+        rgb_color: color,
+        brightness_pct: 100,
+      });
     });
   }
 
@@ -255,6 +275,17 @@ export class LightPanelCard extends LitElement {
     const showTempPresets = this.config.show_temp_presets !== false;
     const showColorPresets = this.config.show_color_presets !== false;
 
+    // Filter entities by capability — only show controls for what the active entities support
+    const dimmableEntities = this.filterBrightness(activeEntities);
+    const colorTempEntities = this.filterColorTemp(activeEntities);
+    const colorEntities = this.filterColor(activeEntities);
+    const onOffOnlyEntities = this.filterOnOffOnly(activeEntities);
+
+    const hasDimmable = dimmableEntities.length > 0;
+    const hasColorTemp = colorTempEntities.length > 0;
+    const hasColor = colorEntities.length > 0;
+    const hasOnOffOnly = onOffOnlyEntities.length > 0;
+
     return html`
       <ha-card>
         <div class="card-content">
@@ -264,14 +295,17 @@ export class LightPanelCard extends LitElement {
 
           ${activeEntities.length > 0
             ? html`
-                ${showBrightness ? this.renderBrightnessSlider(activeEntities) : nothing}
-                ${showColorTemp && this.supportsColorTemp(activeEntities)
+                ${hasOnOffOnly ? this.renderOnOffSection(onOffOnlyEntities) : nothing}
+                ${showBrightness && hasDimmable
+                  ? this.renderBrightnessSlider(activeEntities)
+                  : nothing}
+                ${showColorTemp && hasColorTemp
                   ? this.renderColorTempSlider(activeEntities)
                   : nothing}
-                ${showTempPresets && this.supportsColorTemp(activeEntities)
+                ${showTempPresets && hasColorTemp
                   ? this.renderTempPresets(activeEntities)
                   : nothing}
-                ${showColorPresets && this.supportsColor(activeEntities)
+                ${showColorPresets && hasColor
                   ? this.renderColorPresets(activeEntities)
                   : nothing}
               `
@@ -309,11 +343,38 @@ export class LightPanelCard extends LitElement {
     `;
   }
 
+  // ─── On/Off Only Section ──────────────────────────────────────────
+
+  private renderOnOffSection(entities: string[]): TemplateResult {
+    return html`
+      <div class="onoff-section">
+        ${entities.map((entity) => {
+          const state = this.hass!.states[entity];
+          if (!state) return nothing;
+          const isOn = state.state === "on";
+          const name = state.attributes?.friendly_name || entity.split(".").pop() || entity;
+          return html`
+            <div class="onoff-row">
+              <span class="onoff-name">${name}</span>
+              <button
+                class="onoff-btn ${isOn ? "on" : "off"}"
+                @click=${() => this.toggleEntity(entity)}
+              >
+                ${isOn ? "On" : "Off"}
+              </button>
+            </div>
+          `;
+        })}
+      </div>
+    `;
+  }
+
   // ─── Brightness Slider ────────────────────────────────────────────
 
   private renderBrightnessSlider(entities: string[]): TemplateResult {
     const brightnessPercent = this.getAverageBrightness(entities);
-    const anyOn = this.isAnyOn(entities);
+    const dimmable = this.filterBrightness(entities);
+    const anyOn = this.isAnyOn(dimmable);
 
     return html`
       <div class="slider-card">
@@ -344,7 +405,8 @@ export class LightPanelCard extends LitElement {
   // ─── Color Temperature Slider ─────────────────────────────────────
 
   private renderColorTempSlider(entities: string[]): TemplateResult {
-    const onEntities = entities.filter((e) => this.hass?.states[e]?.state === "on");
+    const capable = this.filterColorTemp(entities);
+    const onEntities = capable.filter((e) => this.hass?.states[e]?.state === "on");
     let tempPercent = 50;
     if (onEntities.length > 0) {
       const totalKelvin = onEntities.reduce((sum, e) => {
@@ -409,7 +471,7 @@ export class LightPanelCard extends LitElement {
   private renderColorPresets(entities: string[]): TemplateResult {
     const presets = this.config?.color_presets || DEFAULT_COLOR_PRESETS;
     return html`
-      <div class="preset-row color-preset-row">
+      <div class="preset-row">
         ${presets.map(
           (p: RGBColorPreset) => html`
             <button
@@ -494,6 +556,7 @@ export class LightPanelCard extends LitElement {
       color: var(--panel-secondary);
       text-align: center;
       padding: 16px;
+      font-style: italic;
     }
 
     /* ── Section Tabs ───────────────────────────── */
@@ -536,6 +599,53 @@ export class LightPanelCard extends LitElement {
     .tab-btn ha-icon {
       --mdc-icon-size: 24px;
       color: inherit;
+    }
+
+    /* ── On/Off Only Section ─────────────────────── */
+    .onoff-section {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .onoff-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 12px;
+      padding: 14px 16px;
+    }
+
+    .onoff-name {
+      font-size: 0.95em;
+      font-weight: 500;
+      color: var(--panel-text);
+    }
+
+    .onoff-btn {
+      padding: 6px 18px;
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.82em;
+      font-weight: 600;
+      transition: background 0.2s, transform 0.1s;
+    }
+
+    .onoff-btn.on {
+      background: var(--amber-glow);
+      color: var(--panel-text);
+      border-color: rgba(255, 193, 7, 0.6);
+    }
+
+    .onoff-btn.off {
+      background: var(--grey-dim);
+      color: var(--panel-secondary);
+    }
+
+    .onoff-btn:active {
+      transform: scale(0.93);
     }
 
     /* ── Slider Card ────────────────────────────── */
@@ -672,12 +782,13 @@ export class LightPanelCard extends LitElement {
       align-items: center;
       justify-content: center;
       gap: 4px;
-      padding: 12px 6px;
+      padding: 14px 8px;
       border: none;
       border-radius: 8px;
       cursor: pointer;
-      font-size: 0.82em;
+      font-size: 0.85em;
       font-weight: 600;
+      min-height: 46px;
       transition: transform 0.1s, filter 0.1s;
     }
 
@@ -698,10 +809,10 @@ export class LightPanelCard extends LitElement {
     }
 
     .color-preset {
-      padding: 12px 8px;
-      font-size: 0.85em;
-      min-height: 42px;
-      border-radius: 6px;
+      padding: 14px 8px;
+      font-size: 0.88em;
+      min-height: 46px;
+      border-radius: 8px;
     }
 
     /* ── Scene Buttons ──────────────────────────── */
