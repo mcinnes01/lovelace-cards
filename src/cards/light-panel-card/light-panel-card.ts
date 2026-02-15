@@ -34,18 +34,22 @@ export class LightPanelCard extends LitElement {
     if (!this.hass || !this.config) return [];
     const section = (this.config[sectionKey] as LightPanelSectionConfig) || {};
     const targets = section.targets || {};
+
+    // Get directly selected entities
     const directEntities = Array.isArray(targets.entity_id)
       ? targets.entity_id
       : Array.isArray(section.entities)
         ? section.entities
         : [];
 
+    // Get selected areas
     const areaIds = Array.isArray(targets.area_id)
       ? targets.area_id
       : section.area
         ? [section.area]
         : [];
 
+    // Get selected labels
     const labelIds = Array.isArray(targets.label_id) ? targets.label_id : [];
 
     if (directEntities.length === 0 && areaIds.length === 0 && labelIds.length === 0) {
@@ -54,22 +58,41 @@ export class LightPanelCard extends LitElement {
 
     const matched = new Set(directEntities);
 
-    Object.keys(this.hass.states).forEach((entityId) => {
-      if (!entityId.startsWith(`${domain}.`)) return;
-      const state = this.hass.states[entityId];
-      const areaId = state?.attributes?.area_id;
-      if (areaId && areaIds.includes(areaId)) {
-        matched.add(entityId);
-        return;
-      }
-      if (labelIds.length > 0) {
-        const registry = this.hass.entities?.[entityId];
-        const labels = registry?.labels || registry?.label_ids || [];
-        if (Array.isArray(labels) && labels.some((label: string) => labelIds.includes(label))) {
-          matched.add(entityId);
+    // If we need to resolve by area or label, iterate all entities
+    if (areaIds.length > 0 || labelIds.length > 0) {
+      Object.keys(this.hass.states).forEach((entityId) => {
+        if (!entityId.startsWith(`${domain}.`)) return;
+
+        // Area resolution: check entity registry first, then device registry
+        if (areaIds.length > 0) {
+          const entityReg = this.hass.entities?.[entityId];
+          // Entity area_id from the entity registry (NOT state attributes)
+          const entityAreaId = entityReg?.area_id;
+          if (entityAreaId && areaIds.includes(entityAreaId)) {
+            matched.add(entityId);
+            return;
+          }
+          // Also check device area_id (entities inherit area from their device)
+          const deviceId = entityReg?.device_id;
+          if (deviceId && this.hass.devices?.[deviceId]) {
+            const deviceAreaId = this.hass.devices[deviceId].area_id;
+            if (deviceAreaId && areaIds.includes(deviceAreaId)) {
+              matched.add(entityId);
+              return;
+            }
+          }
         }
-      }
-    });
+
+        // Label resolution
+        if (labelIds.length > 0) {
+          const entityReg = this.hass.entities?.[entityId];
+          const labels = entityReg?.labels || [];
+          if (Array.isArray(labels) && labels.some((label: string) => labelIds.includes(label))) {
+            matched.add(entityId);
+          }
+        }
+      });
+    }
 
     return Array.from(matched);
   }
@@ -170,6 +193,7 @@ export class LightPanelCard extends LitElement {
 
   private renderLight(entity: string): TemplateResult {
     const state = this.hass!.states[entity];
+    if (!state) return html``;
     const isOn = state.state === "on";
     const brightness = state.attributes?.brightness || 0;
     const brightnessPercent = Math.round((brightness / 255) * 100);
