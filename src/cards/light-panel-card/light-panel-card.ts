@@ -157,6 +157,28 @@ export class LightPanelCard extends LitElement {
       });
     }
 
+    // When using area/label targeting, filter by entity naming convention
+    // so lights don't appear under lamps and vice versa.
+    // Direct entity_id picks are never filtered (user chose them explicitly).
+    if ((areaIds.length > 0 || labelIds.length > 0) && domain === "light") {
+      const suffixMap: Record<string, RegExp> = {
+        lights: /[_](light|lights)$/,
+        lamps:  /[_](lamp|lamps)$/,
+        accents: /[_](accent|accents|led|strip|rgb)$/,
+      };
+      const pattern = suffixMap[sectionKey as string];
+      if (pattern) {
+        const directSet = new Set(directEntities);
+        matched.forEach((entityId) => {
+          if (directSet.has(entityId)) return; // keep explicit picks
+          const name = entityId.replace(/^light\./, "");
+          if (!pattern.test(name)) {
+            matched.delete(entityId);
+          }
+        });
+      }
+    }
+
     return Array.from(matched);
   }
 
