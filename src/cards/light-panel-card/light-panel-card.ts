@@ -25,6 +25,19 @@ const TABS: TabDef[] = [
   { key: "accents", label: "Accent", icon: "mdi:led-strip-variant", entityKey: "accents" },
 ];
 
+const SCENE_COLORS = [
+  "rgba(100, 150, 255, 0.35)",
+  "rgba(76, 175, 80, 0.35)",
+  "rgba(156, 39, 176, 0.35)",
+  "rgba(255, 152, 0, 0.35)",
+  "rgba(233, 30, 99, 0.35)",
+  "rgba(0, 188, 212, 0.35)",
+  "rgba(255, 87, 34, 0.35)",
+  "rgba(63, 81, 181, 0.35)",
+  "rgba(139, 195, 74, 0.35)",
+  "rgba(121, 85, 72, 0.35)",
+];
+
 @customElement("light-panel-card")
 export class LightPanelCard extends LitElement {
   @property({ attribute: false }) public hass?: any;
@@ -331,7 +344,6 @@ export class LightPanelCard extends LitElement {
   // ─── Color Temperature Slider ─────────────────────────────────────
 
   private renderColorTempSlider(entities: string[]): TemplateResult {
-    // Get average color temp as percentage (2700K = warm/right, 6500K = cool/left)
     const onEntities = entities.filter((e) => this.hass?.states[e]?.state === "on");
     let tempPercent = 50;
     if (onEntities.length > 0) {
@@ -340,7 +352,6 @@ export class LightPanelCard extends LitElement {
         return sum + k;
       }, 0);
       const avgKelvin = totalKelvin / onEntities.length;
-      // Map kelvin 2700-6500 to 0-100 percent
       tempPercent = Math.round(((avgKelvin - 2700) / (6500 - 2700)) * 100);
     }
 
@@ -398,7 +409,7 @@ export class LightPanelCard extends LitElement {
   private renderColorPresets(entities: string[]): TemplateResult {
     const presets = this.config?.color_presets || DEFAULT_COLOR_PRESETS;
     return html`
-      <div class="preset-row">
+      <div class="preset-row color-preset-row">
         ${presets.map(
           (p: RGBColorPreset) => html`
             <button
@@ -417,20 +428,24 @@ export class LightPanelCard extends LitElement {
   // ─── Scene Buttons ────────────────────────────────────────────────
 
   private renderSceneButtons(entities: string[]): TemplateResult {
+    let colorIdx = 0;
     return html`
       <div class="scene-section">
         <div class="scene-row">
           ${entities.map((entity) => {
-            const state = this.hass!.states[entity];
-            if (!state || state.state === "unavailable" || state.state === "unknown") {
+            const st = this.hass!.states[entity];
+            if (!st || st.state === "unavailable" || st.state === "unknown") {
               return nothing;
             }
-            const name = state.attributes?.friendly_name || entity.split(".").pop() || entity;
-            const icon = state.attributes?.icon || "mdi:palette";
+            const name = st.attributes?.friendly_name || entity.split(".").pop() || entity;
+            const icon = st.attributes?.icon || "mdi:palette";
+            const bg = SCENE_COLORS[colorIdx % SCENE_COLORS.length];
+            colorIdx++;
 
             return html`
               <button
                 class="scene-btn"
+                style="background: ${bg}"
                 @click=${() => this.activateScene(entity)}
               >
                 <ha-icon .icon=${icon}></ha-icon>
@@ -453,7 +468,6 @@ export class LightPanelCard extends LitElement {
       --panel-secondary: var(--secondary-text-color, rgba(255,255,255,0.6));
       --amber-glow: rgba(255, 193, 7, 0.5);
       --grey-dim: rgba(128, 128, 128, 0.2);
-      --scene-green: rgba(76, 175, 80, 0.3);
     }
 
     ha-card {
@@ -657,12 +671,12 @@ export class LightPanelCard extends LitElement {
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 2px;
-      padding: 10px 6px;
+      gap: 4px;
+      padding: 12px 6px;
       border: none;
       border-radius: 8px;
       cursor: pointer;
-      font-size: 0.78em;
+      font-size: 0.82em;
       font-weight: 600;
       transition: transform 0.1s, filter 0.1s;
     }
@@ -675,13 +689,19 @@ export class LightPanelCard extends LitElement {
       filter: brightness(1.15);
     }
 
+    .temp-preset {
+      padding: 10px 6px;
+    }
+
     .temp-preset .preset-icon {
-      --mdc-icon-size: 22px;
+      --mdc-icon-size: 24px;
     }
 
     .color-preset {
-      padding: 10px 6px;
-      font-size: 0.8em;
+      padding: 12px 8px;
+      font-size: 0.85em;
+      min-height: 42px;
+      border-radius: 6px;
     }
 
     /* ── Scene Buttons ──────────────────────────── */
@@ -707,7 +727,6 @@ export class LightPanelCard extends LitElement {
       cursor: pointer;
       font-size: 0.85em;
       font-weight: 600;
-      background: var(--scene-green);
       color: var(--panel-text);
       transition: transform 0.1s, filter 0.1s;
     }
@@ -717,7 +736,7 @@ export class LightPanelCard extends LitElement {
     }
 
     .scene-btn:hover {
-      filter: brightness(1.2);
+      filter: brightness(1.3);
     }
 
     .scene-btn ha-icon {
