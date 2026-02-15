@@ -35,22 +35,22 @@ export class LightPanelCard extends LitElement {
     const section = (this.config[sectionKey] as LightPanelSectionConfig) || {};
     const targets = section.targets || {};
 
+    // Normalize: HA target selector stores single values as strings, multiple as arrays
+    const toArray = (val: unknown): string[] =>
+      Array.isArray(val) ? val : typeof val === "string" ? [val] : [];
+
     // Get directly selected entities
-    const directEntities = Array.isArray(targets.entity_id)
-      ? targets.entity_id
-      : Array.isArray(section.entities)
-        ? section.entities
-        : [];
+    const directEntities = toArray(targets.entity_id).length
+      ? toArray(targets.entity_id)
+      : toArray(section.entities);
 
     // Get selected areas
-    const areaIds = Array.isArray(targets.area_id)
-      ? targets.area_id
-      : section.area
-        ? [section.area]
-        : [];
+    const areaIds = toArray(targets.area_id).length
+      ? toArray(targets.area_id)
+      : toArray(section.area);
 
     // Get selected labels
-    const labelIds = Array.isArray(targets.label_id) ? targets.label_id : [];
+    const labelIds = toArray(targets.label_id);
 
     if (directEntities.length === 0 && areaIds.length === 0 && labelIds.length === 0) {
       return [];
