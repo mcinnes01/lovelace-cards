@@ -1,4 +1,3 @@
-import { getBabelInputPlugin, getBabelOutputPlugin } from "@rollup/plugin-babel";
 import commonjs from "@rollup/plugin-commonjs";
 import json from "@rollup/plugin-json";
 import nodeResolve from "@rollup/plugin-node-resolve";
@@ -10,12 +9,11 @@ const plugins = [
   nodeResolve(),
   json(),
   commonjs(),
-  getBabelInputPlugin({ babelHelpers: "bundled" }),
-  getBabelOutputPlugin({
-    presets: [["@babel/preset-env", { modules: false }]],
-    compact: true,
+  terser({
+    output: {
+      comments: false,
+    },
   }),
-  terser(),
 ];
 
 export default {
