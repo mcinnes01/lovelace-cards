@@ -45,6 +45,9 @@ export class LightPanelCard extends LitElement {
   @state() private activeTab: SectionTab = "all";
   // null = "All" (control everything in the tab), or a specific entity_id
   @state() private selectedEntity: string | null = null;
+  @state() private _colorPickerOpen = false;
+  @state() private _colorPickerHex = "#ffffff";
+  @state() private _colorPickerTargets: string[] = [];
 
   public setConfig(config: LightPanelCardConfig): void {
     this.config = config;
@@ -317,6 +320,27 @@ export class LightPanelCard extends LitElement {
     this.hass.callService("scene", "turn_on", { entity_id: entity });
   }
 
+  private _hexToRgb(hex: string): [number, number, number] {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return [r, g, b];
+  }
+
+  private _openColorPicker(entities: string[]): void {
+    this._colorPickerTargets = entities;
+    this._colorPickerOpen = true;
+  }
+
+  private _closeColorPicker(): void {
+    this._colorPickerOpen = false;
+  }
+
+  private _applyCustomColor(): void {
+    this.setRGBAll(this._colorPickerTargets, this._hexToRgb(this._colorPickerHex));
+    this._colorPickerOpen = false;
+  }
+
   // ─── Rendering ─────────────────────────────────────────────────────
 
   protected render(): TemplateResult {
@@ -337,6 +361,32 @@ export class LightPanelCard extends LitElement {
           ${sceneEntities.length > 0 ? this.renderSceneButtons(sceneEntities) : nothing}
         </div>
       </ha-card>
+      ${this._colorPickerOpen ? this.renderColorPickerModal() : nothing}
+    `;
+  }
+
+  // ─── Color Picker Modal ────────────────────────────────────────────
+
+  private renderColorPickerModal(): TemplateResult {
+    return html`
+      <div class="color-modal-overlay" @click=${this._closeColorPicker}>
+        <div class="color-modal" @click=${(e: Event) => e.stopPropagation()}>
+          <h3 class="color-modal-title">Custom Colour</h3>
+          <div class="color-swatch" style="background: ${this._colorPickerHex}"></div>
+          <input
+            type="color"
+            class="color-native-input"
+            .value=${this._colorPickerHex}
+            @input=${(e: Event) => {
+              this._colorPickerHex = (e.target as HTMLInputElement).value;
+            }}
+          />
+          <div class="color-modal-actions">
+            <button class="color-modal-cancel" @click=${this._closeColorPicker}>Cancel</button>
+            <button class="color-modal-apply" @click=${this._applyCustomColor}>Apply</button>
+          </div>
+        </div>
+      </div>
     `;
   }
 
@@ -589,6 +639,7 @@ export class LightPanelCard extends LitElement {
 
   private renderTempPresets(entities: string[]): TemplateResult {
     const presets = this.config?.color_temp_presets || DEFAULT_TEMP_PRESETS;
+    const colorCapable = this.filterColor(entities);
     return html`
       <div class="preset-row">
         ${presets.map(
@@ -603,6 +654,17 @@ export class LightPanelCard extends LitElement {
             </button>
           `
         )}
+        ${colorCapable.length > 0
+          ? html`
+              <button
+                class="preset-btn temp-preset color-picker-btn"
+                @click=${() => this._openColorPicker(colorCapable)}
+              >
+                <ha-icon icon="mdi:palette" class="preset-icon"></ha-icon>
+                <span>Custom</span>
+              </button>
+            `
+          : nothing}
       </div>
     `;
   }
@@ -1089,6 +1151,107 @@ export class LightPanelCard extends LitElement {
 
     .scene-btn ha-icon {
       --mdc-icon-size: 32px;
+    }
+
+    /* ── Colour Picker Button ───────────────────── */
+    .color-picker-btn {
+      background: linear-gradient(
+        135deg,
+        rgba(255, 100, 100, 0.5) 0%,
+        rgba(100, 200, 100, 0.5) 33%,
+        rgba(100, 100, 255, 0.5) 66%,
+        rgba(255, 200, 100, 0.5) 100%
+      );
+      color: #fff;
+    }
+
+    /* ── Colour Picker Modal ────────────────────── */
+    .color-modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+    }
+
+    .color-modal {
+      background: var(--ha-card-background, var(--card-background-color, #1c1c1e));
+      border-radius: 16px;
+      padding: 24px 20px 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+      min-width: 240px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    }
+
+    .color-modal-title {
+      margin: 0;
+      font-size: 1.1em;
+      font-weight: 600;
+      color: var(--primary-text-color, #fff);
+    }
+
+    .color-swatch {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      border: 3px solid rgba(255, 255, 255, 0.2);
+      transition: background 0.1s;
+    }
+
+    .color-native-input {
+      width: 100%;
+      height: 48px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      padding: 4px;
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .color-modal-actions {
+      display: flex;
+      gap: 10px;
+      width: 100%;
+    }
+
+    .color-modal-cancel,
+    .color-modal-apply {
+      flex: 1;
+      padding: 12px;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 0.95em;
+      font-weight: 600;
+      transition: filter 0.1s, transform 0.1s;
+    }
+
+    .color-modal-cancel:active,
+    .color-modal-apply:active {
+      transform: scale(0.96);
+    }
+
+    .color-modal-cancel {
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--secondary-text-color, rgba(255, 255, 255, 0.6));
+    }
+
+    .color-modal-cancel:hover {
+      filter: brightness(1.3);
+    }
+
+    .color-modal-apply {
+      background: var(--amber-glow);
+      color: var(--primary-text-color, #fff);
+    }
+
+    .color-modal-apply:hover {
+      filter: brightness(1.2);
     }
   `;
 }
