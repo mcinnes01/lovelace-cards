@@ -1,4 +1,4 @@
-import { html, LitElement, css, TemplateResult, nothing } from "lit";
+import { html, LitElement, css, TemplateResult, nothing, PropertyValues } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import {
   LightPanelCardConfig,
@@ -38,6 +38,26 @@ const SCENE_COLORS = [
   "rgba(121, 85, 72, 0.35)",
 ];
 
+// HA-style quick colour swatches (warm → cool)
+const HA_COLOR_SWATCHES: Array<[number, number, number]> = [
+  [255, 130, 0],
+  [255, 185, 100],
+  [255, 225, 180],
+  [255, 255, 240],
+  [160, 180, 255],
+  [190, 150, 255],
+  [255, 160, 220],
+  [255, 100, 130],
+];
+
+// 24-colour hexagonal grid (4 rows × 6 cols)
+const HEX_GRID_COLORS: Array<[number, number, number]> = [
+  [255, 0, 0],    [255, 128, 0],  [255, 220, 0],  [100, 220, 0],  [0, 200, 80],   [0, 200, 200],
+  [0, 100, 255],  [80, 0, 255],   [200, 0, 255],  [255, 0, 180],  [255, 80, 80],  [200, 200, 0],
+  [255, 150, 150],[255, 200, 130],[255, 240, 150],[180, 255, 150],[150, 240, 255],[150, 180, 255],
+  [220, 150, 255],[255, 150, 220],[200, 220, 255],[220, 255, 220],[255, 230, 200],[200, 200, 200],
+];
+
 @customElement("light-panel-card")
 export class LightPanelCard extends LitElement {
   @property({ attribute: false }) public hass?: any;
@@ -46,8 +66,15 @@ export class LightPanelCard extends LitElement {
   // null = "All" (control everything in the tab), or a specific entity_id
   @state() private selectedEntity: string | null = null;
   @state() private _colorPickerOpen = false;
-  @state() private _colorPickerHex = "#ffffff";
+  @state() private _colorPickerHex = "#ff8800";
   @state() private _colorPickerTargets: string[] = [];
+  @state() private _colorPickerMode: "color" | "grid" | "temp" = "color";
+  @state() private _colorH = 0;
+  @state() private _colorS = 1;
+  @state() private _isDragging = false;
+  @state() private _colorPickerKelvin = 4000;
+  @state() private _showEffects = false;
+  @state() private _selectedEffect: string | null = null;
 
   public setConfig(config: LightPanelCardConfig): void {
     this.config = config;
@@ -320,15 +347,223 @@ export class LightPanelCard extends LitElement {
     this.hass.callService("scene", "turn_on", { entity_id: entity });
   }
 
+  // ─── Color conversion helpers ─────────────────────────────────────
+
   private _hexToRgb(hex: string): [number, number, number] {
-    const r = parseInt(hex.slice(1, 3), 16);
-    const g = parseInt(hex.slice(3, 5), 16);
-    const b = parseInt(hex.slice(5, 7), 16);
-    return [r, g, b];
+    return [
+      parseInt(hex.slice(1, 3), 16),
+      parseInt(hex.slice(3, 5), 16),
+      parseInt(hex.slice(5, 7), 16),
+    ];
+  }
+
+  private _rgbToHex(r: number, g: number, b: number): string {
+    return "#" + [r, g, b].map((c) => c.toString(16).padStart(2, "0")).join("");
+  }
+
+  private _hsvToRgb(h: number, s: number, v: number): [number, number, number] {
+    h = ((h % 360) + 360) % 360;
+    const i = Math.floor(h / 60);
+    const f = h / 60 - i;
+    const p = v * (1 - s);
+    const q = v * (1 - f * s);
+    const t = v * (1 - (1 - f) * s);
+    let r = 0, g = 0, b = 0;
+    switch (i % 6) {
+      case 0: r = v; g = t; b = p; break;
+      case 1: r = q; g = v; b = p; break;
+      case 2: r = p; g = v; b = t; break;
+      case 3: r = p; g = q; b = v; break;
+      case 4: r = t; g = p; b = v; break;
+      case 5: r = v; g = p; b = q; break;
+    }
+    return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+  }
+
+  private _rgbToHsv(r: number, g: number, b: number): [number, number, number] {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const d = max - min;
+    const s = max === 0 ? 0 : d / max;
+    const v = max;
+    let h = 0;
+    if (max !== min) {
+      switch (max) {
+        case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+        case g: h = ((b - r) / d + 2) / 6; break;
+        case b: h = ((r - g) / d + 4) / 6; break;
+      }
+    }
+    return [h * 360, s, v];
+  }
+
+  // ─── Picker state helpers ─────────────────────────────────────────
+
+  private _getCurrentEntityColor(): string {
+    const target = this._colorPickerTargets[0];
+    if (!target) return "#ff8800";
+    const st = this.hass?.states[target];
+    if (!st || st.state !== "on") return "#ff8800";
+    const rgb = st.attributes?.rgb_color;
+    if (rgb) return this._rgbToHex(rgb[0], rgb[1], rgb[2]);
+    return "#ff8800";
+  }
+
+  private _getEffects(): string[] {
+    const effects = new Set<string>();
+    for (const entity of this._colorPickerTargets) {
+      const list = this.hass?.states[entity]?.attributes?.effect_list;
+      if (Array.isArray(list)) list.forEach((e: string) => effects.add(e));
+    }
+    return Array.from(effects);
+  }
+
+  private _setEffect(effect: string): void {
+    if (!this.hass) return;
+    this._colorPickerTargets.forEach((entity) => {
+      this.hass!.callService("light", "turn_on", { entity_id: entity, effect });
+    });
+    this._selectedEffect = effect;
+  }
+
+  private _pickSwatchColor(color: [number, number, number]): void {
+    const [h, s] = this._rgbToHsv(color[0], color[1], color[2]);
+    this._colorH = h;
+    this._colorS = s;
+    this._colorPickerHex = this._rgbToHex(color[0], color[1], color[2]);
+    if (this._colorPickerMode === "grid") this._colorPickerMode = "color";
+    requestAnimationFrame(() => this._drawWheelWithSelector());
+  }
+
+  private _onHexInput(value: string): void {
+    if (/^#[0-9a-fA-F]{6}$/.test(value)) {
+      const [r, g, b] = this._hexToRgb(value);
+      const [h, s] = this._rgbToHsv(r, g, b);
+      this._colorH = h;
+      this._colorS = s;
+      this._colorPickerHex = value.toLowerCase();
+      requestAnimationFrame(() => this._drawWheelWithSelector());
+    }
+  }
+
+  private async _tryEyeDropper(): Promise<void> {
+    try {
+      const dropper = new (window as any).EyeDropper();
+      const result = await dropper.open();
+      const [r, g, b] = this._hexToRgb(result.sRGBHex);
+      const [h, s] = this._rgbToHsv(r, g, b);
+      this._colorH = h;
+      this._colorS = s;
+      this._colorPickerHex = result.sRGBHex;
+      requestAnimationFrame(() => this._drawWheelWithSelector());
+    } catch {
+      // user cancelled or not supported
+    }
+  }
+
+  // ─── Canvas colour wheel ─────────────────────────────────────────
+
+  private _drawColorWheel(canvas: HTMLCanvasElement): void {
+    const size = canvas.width;
+    const cx = size / 2;
+    const cy = size / 2;
+    const radius = size / 2;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const imageData = ctx.createImageData(size, size);
+    const data = imageData.data;
+    for (let py = 0; py < size; py++) {
+      for (let px = 0; px < size; px++) {
+        const dx = px - cx;
+        const dy = py - cy;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist <= radius) {
+          const hue = ((Math.atan2(dy, dx) * 180 / Math.PI) + 360) % 360;
+          const sat = dist / radius;
+          const [r, g, b] = this._hsvToRgb(hue, sat, 1);
+          const idx = (py * size + px) * 4;
+          data[idx] = r;
+          data[idx + 1] = g;
+          data[idx + 2] = b;
+          data[idx + 3] = 255;
+        }
+      }
+    }
+    ctx.putImageData(imageData, 0, 0);
+  }
+
+  private _drawWheelWithSelector(): void {
+    const canvas = this.shadowRoot?.querySelector("#color-wheel") as HTMLCanvasElement | null;
+    if (!canvas) return;
+    this._drawColorWheel(canvas);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    const radius = cx - 4;
+    const angle = (this._colorH * Math.PI) / 180;
+    const dist = this._colorS * radius;
+    const sx = cx + dist * Math.cos(angle);
+    const sy = cy + dist * Math.sin(angle);
+    ctx.beginPath();
+    ctx.arc(sx, sy, 10, 0, Math.PI * 2);
+    ctx.strokeStyle = "white";
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(sx, sy, 10, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.35)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  private _applyWheelCoords(canvas: HTMLCanvasElement, clientX: number, clientY: number): void {
+    const rect = canvas.getBoundingClientRect();
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    const x = (clientX - rect.left) * (canvas.width / rect.width) - cx;
+    const y = (clientY - rect.top) * (canvas.height / rect.height) - cy;
+    const hue = ((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360;
+    const sat = Math.min(Math.sqrt(x * x + y * y) / cx, 1);
+    const [r, g, b] = this._hsvToRgb(hue, sat, 1);
+    this._colorH = hue;
+    this._colorS = sat;
+    this._colorPickerHex = this._rgbToHex(r, g, b);
+    this._drawWheelWithSelector();
+  }
+
+  private _onWheelPointerDown(e: PointerEvent): void {
+    this._isDragging = true;
+    const canvas = e.currentTarget as HTMLCanvasElement;
+    canvas.setPointerCapture(e.pointerId);
+    this._applyWheelCoords(canvas, e.clientX, e.clientY);
+  }
+
+  private _onWheelPointerMove(e: PointerEvent): void {
+    if (!this._isDragging) return;
+    this._applyWheelCoords(e.currentTarget as HTMLCanvasElement, e.clientX, e.clientY);
+  }
+
+  private _onWheelPointerUp(_e: PointerEvent): void {
+    this._isDragging = false;
   }
 
   private _openColorPicker(entities: string[]): void {
     this._colorPickerTargets = entities;
+    this._colorPickerMode = "color";
+    this._showEffects = false;
+    this._selectedEffect = null;
+    const hex = this._getCurrentEntityColor();
+    const [r, g, b] = this._hexToRgb(hex);
+    const [h, s] = this._rgbToHsv(r, g, b);
+    this._colorH = h;
+    this._colorS = s;
+    this._colorPickerHex = hex;
+    const firstTarget = entities[0];
+    this._colorPickerKelvin = firstTarget
+      ? (this.hass?.states[firstTarget]?.attributes?.color_temp_kelvin ?? 4000)
+      : 4000;
     this._colorPickerOpen = true;
   }
 
@@ -337,8 +572,25 @@ export class LightPanelCard extends LitElement {
   }
 
   private _applyCustomColor(): void {
-    this.setRGBAll(this._colorPickerTargets, this._hexToRgb(this._colorPickerHex));
+    if (this._colorPickerMode === "temp") {
+      this.setColorTempAll(this._colorPickerTargets, this._colorPickerKelvin);
+    } else {
+      const [r, g, b] = this._hsvToRgb(this._colorH, this._colorS, 1);
+      this.setRGBAll(this._colorPickerTargets, [r, g, b]);
+    }
     this._colorPickerOpen = false;
+  }
+
+  // ─── Lifecycle ─────────────────────────────────────────────────────
+
+  protected updated(changedProperties: PropertyValues): void {
+    super.updated(changedProperties);
+    if (
+      (changedProperties.has("_colorPickerOpen") && this._colorPickerOpen && this._colorPickerMode === "color") ||
+      (changedProperties.has("_colorPickerMode") && this._colorPickerMode === "color" && this._colorPickerOpen)
+    ) {
+      requestAnimationFrame(() => this._drawWheelWithSelector());
+    }
   }
 
   // ─── Rendering ─────────────────────────────────────────────────────
@@ -368,23 +620,158 @@ export class LightPanelCard extends LitElement {
   // ─── Color Picker Modal ────────────────────────────────────────────
 
   private renderColorPickerModal(): TemplateResult {
+    const [r, g, b] = this._hsvToRgb(this._colorH, this._colorS, 1);
+    const selectedHex = this._rgbToHex(r, g, b);
+    const currentHex = this._getCurrentEntityColor();
+    const effects = this._getEffects();
+    const hasTemp = this._colorPickerTargets.some((e) => this.entitySupportsColorTemp(e));
+    const presets = this.config?.color_temp_presets || DEFAULT_TEMP_PRESETS;
+    const hasEyeDropper = "EyeDropper" in window;
+
     return html`
       <div class="color-modal-overlay" @click=${this._closeColorPicker}>
         <div class="color-modal" @click=${(e: Event) => e.stopPropagation()}>
-          <h3 class="color-modal-title">Custom Colour</h3>
-          <div class="color-swatch" style="background: ${this._colorPickerHex}"></div>
-          <input
-            type="color"
-            class="color-native-input"
-            .value=${this._colorPickerHex}
-            @input=${(e: Event) => {
-              this._colorPickerHex = (e.target as HTMLInputElement).value;
-            }}
-          />
+
+          <!-- Mode tabs -->
+          <div class="picker-mode-tabs">
+            <button
+              class="picker-mode-tab ${this._colorPickerMode === "color" ? "active" : ""}"
+              @click=${() => { this._colorPickerMode = "color"; }}
+              title="Colour wheel"
+            >
+              <ha-icon icon="mdi:palette"></ha-icon>
+            </button>
+            <button
+              class="picker-mode-tab ${this._colorPickerMode === "grid" ? "active" : ""}"
+              @click=${() => { this._colorPickerMode = "grid"; }}
+              title="Colour grid"
+            >
+              <ha-icon icon="mdi:view-grid"></ha-icon>
+            </button>
+            ${hasTemp ? html`
+              <button
+                class="picker-mode-tab ${this._colorPickerMode === "temp" ? "active" : ""}"
+                @click=${() => { this._colorPickerMode = "temp"; }}
+                title="Colour temperature"
+              >
+                <ha-icon icon="mdi:thermometer"></ha-icon>
+              </button>
+            ` : nothing}
+          </div>
+
+          <!-- Colour wheel (fine picker) -->
+          ${this._colorPickerMode === "color" ? html`
+            <div class="wheel-wrapper">
+              <canvas
+                id="color-wheel"
+                width="260"
+                height="260"
+                class="color-wheel-canvas"
+                @pointerdown=${this._onWheelPointerDown}
+                @pointermove=${this._onWheelPointerMove}
+                @pointerup=${this._onWheelPointerUp}
+              ></canvas>
+              ${hasEyeDropper ? html`
+                <button class="eyedropper-btn" @click=${this._tryEyeDropper} title="Pick colour from screen">
+                  <ha-icon icon="mdi:eyedropper-variant"></ha-icon>
+                </button>
+              ` : nothing}
+            </div>
+
+          <!-- Hex grid (coarse picker) -->
+          ` : this._colorPickerMode === "grid" ? html`
+            <div class="hex-grid">
+              ${HEX_GRID_COLORS.map((c) => html`
+                <button
+                  class="hex-cell"
+                  style="background: rgb(${c[0]}, ${c[1]}, ${c[2]})"
+                  @click=${() => this._pickSwatchColor(c)}
+                ></button>
+              `)}
+            </div>
+
+          <!-- Colour temperature mode -->
+          ` : html`
+            <div class="temp-picker-area">
+              <div class="temp-gradient-track">
+                <input
+                  type="range"
+                  min="2700"
+                  max="6500"
+                  .value=${String(this._colorPickerKelvin)}
+                  @input=${(e: Event) => {
+                    this._colorPickerKelvin = Number((e.target as HTMLInputElement).value);
+                  }}
+                />
+              </div>
+              <div class="temp-presets-mini">
+                ${presets.map((p: ColorTempPreset) => html`
+                  <button
+                    class="temp-mini-btn"
+                    style="background: ${p.color}; color: ${p.text_color || "#fff"}"
+                    @click=${() => { this._colorPickerKelvin = p.kelvin; }}
+                  >${p.name}</button>
+                `)}
+              </div>
+            </div>
+          `}
+
+          <!-- Colour preview + values (colour modes only) -->
+          ${this._colorPickerMode !== "temp" ? html`
+            <div class="color-info-row">
+              <div class="color-preview-pair">
+                <div class="preview-box" style="background: ${currentHex}" title="Current colour"></div>
+                <div class="preview-box selected-preview" style="background: ${selectedHex}" title="Selected colour"></div>
+              </div>
+              <div class="color-values-col">
+                <input
+                  class="hex-input"
+                  type="text"
+                  .value=${selectedHex}
+                  maxlength="7"
+                  @change=${(e: Event) => this._onHexInput((e.target as HTMLInputElement).value)}
+                />
+                <span class="rgb-value">rgb(${r}, ${g}, ${b})</span>
+              </div>
+            </div>
+
+            <!-- Quick swatches -->
+            <div class="quick-swatches">
+              ${HA_COLOR_SWATCHES.map((c) => html`
+                <button
+                  class="quick-swatch"
+                  style="background: rgb(${c[0]}, ${c[1]}, ${c[2]})"
+                  @click=${() => this._pickSwatchColor(c)}
+                ></button>
+              `)}
+            </div>
+          ` : nothing}
+
+          <!-- Effects -->
+          ${effects.length > 0 ? html`
+            <button class="effects-toggle-btn" @click=${() => { this._showEffects = !this._showEffects; }}>
+              <ha-icon icon="mdi:auto-fix"></ha-icon>
+              <span>Effect</span>
+              <ha-icon icon=${this._showEffects ? "mdi:chevron-up" : "mdi:chevron-down"}></ha-icon>
+            </button>
+            ${this._showEffects ? html`
+              <div class="effects-list">
+                ${effects.map((effect: string) => html`
+                  <button
+                    class="effect-btn ${this._selectedEffect === effect ? "active" : ""}"
+                    @click=${() => this._setEffect(effect)}
+                  >${effect}</button>
+                `)}
+              </div>
+            ` : nothing}
+          ` : nothing}
+
+          <!-- Actions -->
           <div class="color-modal-actions">
             <button class="color-modal-cancel" @click=${this._closeColorPicker}>Cancel</button>
             <button class="color-modal-apply" @click=${this._applyCustomColor}>Apply</button>
           </div>
+
         </div>
       </div>
     `;
@@ -1169,7 +1556,7 @@ export class LightPanelCard extends LitElement {
     .color-modal-overlay {
       position: fixed;
       inset: 0;
-      background: rgba(0, 0, 0, 0.6);
+      background: rgba(0, 0, 0, 0.65);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -1178,45 +1565,313 @@ export class LightPanelCard extends LitElement {
 
     .color-modal {
       background: var(--ha-card-background, var(--card-background-color, #1c1c1e));
-      border-radius: 16px;
-      padding: 24px 20px 20px;
+      border-radius: 20px;
+      padding: 16px;
       display: flex;
       flex-direction: column;
-      align-items: center;
-      gap: 16px;
-      min-width: 240px;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+      align-items: stretch;
+      gap: 12px;
+      width: min(320px, calc(100vw - 32px));
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
     }
 
-    .color-modal-title {
-      margin: 0;
-      font-size: 1.1em;
-      font-weight: 600;
+    /* Mode tabs */
+    .picker-mode-tabs {
+      display: flex;
+      gap: 6px;
+      justify-content: center;
+    }
+
+    .picker-mode-tab {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 44px;
+      height: 44px;
+      border: none;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--secondary-text-color, rgba(255, 255, 255, 0.5));
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s;
+    }
+
+    .picker-mode-tab.active {
+      background: var(--amber-glow);
       color: var(--primary-text-color, #fff);
     }
 
-    .color-swatch {
-      width: 80px;
-      height: 80px;
-      border-radius: 50%;
-      border: 3px solid rgba(255, 255, 255, 0.2);
-      transition: background 0.1s;
+    .picker-mode-tab ha-icon {
+      --mdc-icon-size: 22px;
     }
 
-    .color-native-input {
+    /* Colour wheel */
+    .wheel-wrapper {
+      position: relative;
+      display: flex;
+      justify-content: center;
+    }
+
+    .color-wheel-canvas {
       width: 100%;
-      height: 48px;
+      max-width: 260px;
+      height: auto;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      cursor: crosshair;
+      touch-action: none;
+      display: block;
+    }
+
+    .eyedropper-btn {
+      position: absolute;
+      top: 4px;
+      right: calc(50% - 130px + 4px);
+      width: 36px;
+      height: 36px;
+      background: rgba(0, 0, 0, 0.35);
+      backdrop-filter: blur(4px);
+      border: none;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      transition: background 0.15s;
+    }
+
+    .eyedropper-btn:hover {
+      background: rgba(0, 0, 0, 0.55);
+    }
+
+    .eyedropper-btn ha-icon {
+      --mdc-icon-size: 20px;
+    }
+
+    /* Hex grid (coarse picker) */
+    .hex-grid {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 6px;
+      padding: 4px 0;
+    }
+
+    .hex-cell {
+      aspect-ratio: 0.866;
+      clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+      border: none;
+      cursor: pointer;
+      transition: transform 0.1s, filter 0.1s;
+    }
+
+    .hex-cell:hover {
+      filter: brightness(1.25);
+      transform: scale(1.12);
+    }
+
+    .hex-cell:active {
+      transform: scale(0.9);
+    }
+
+    /* Colour temperature mode */
+    .temp-picker-area {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 4px 0;
+    }
+
+    .temp-gradient-track {
+      position: relative;
+      height: 36px;
+      border-radius: 18px;
+      overflow: hidden;
+      background: linear-gradient(
+        to right,
+        rgba(255, 140, 0, 0.9) 0%,
+        rgba(255, 200, 130, 0.8) 30%,
+        rgba(255, 255, 255, 0.9) 55%,
+        rgba(180, 220, 255, 0.9) 80%,
+        rgba(140, 195, 250, 0.9) 100%
+      );
+    }
+
+    .temp-gradient-track input[type="range"] {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      -webkit-appearance: none;
+      appearance: none;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    .temp-gradient-track input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px;
+      height: 36px;
+      background: rgba(255, 255, 255, 0.9);
+      border-radius: 4px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+      cursor: pointer;
+    }
+
+    .temp-gradient-track input[type="range"]::-moz-range-thumb {
+      width: 16px;
+      height: 36px;
+      background: rgba(255, 255, 255, 0.9);
+      border-radius: 4px;
+      border: none;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+      cursor: pointer;
+    }
+
+    .temp-presets-mini {
+      display: flex;
+      gap: 6px;
+    }
+
+    .temp-mini-btn {
+      flex: 1;
+      padding: 8px 4px;
       border: none;
       border-radius: 8px;
       cursor: pointer;
-      padding: 4px;
-      background: rgba(255, 255, 255, 0.1);
+      font-size: 0.75em;
+      font-weight: 600;
+      text-align: center;
+      transition: transform 0.1s, filter 0.1s;
     }
 
+    .temp-mini-btn:hover { filter: brightness(1.15); }
+    .temp-mini-btn:active { transform: scale(0.95); }
+
+    /* Colour info row */
+    .color-info-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .color-preview-pair {
+      display: flex;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 2px solid rgba(255, 255, 255, 0.15);
+      flex-shrink: 0;
+    }
+
+    .preview-box {
+      width: 36px;
+      height: 36px;
+    }
+
+    .selected-preview {
+      border-left: 2px solid rgba(255, 255, 255, 0.15);
+    }
+
+    .color-values-col {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .hex-input {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 6px;
+      color: var(--primary-text-color, #fff);
+      font-size: 0.85em;
+      font-family: monospace;
+      padding: 5px 8px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    .rgb-value {
+      font-size: 0.72em;
+      color: var(--secondary-text-color, rgba(255, 255, 255, 0.55));
+      font-family: monospace;
+    }
+
+    /* Quick swatches */
+    .quick-swatches {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+    }
+
+    .quick-swatch {
+      height: 34px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: transform 0.1s, filter 0.1s;
+    }
+
+    .quick-swatch:hover {
+      filter: brightness(1.2);
+      transform: scale(1.06);
+    }
+
+    .quick-swatch:active { transform: scale(0.92); }
+
+    /* Effects */
+    .effects-toggle-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding: 10px 12px;
+      border: none;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.07);
+      color: var(--primary-text-color, #fff);
+      cursor: pointer;
+      font-size: 0.9em;
+      font-weight: 600;
+      transition: background 0.15s;
+      box-sizing: border-box;
+    }
+
+    .effects-toggle-btn:hover { background: rgba(255, 255, 255, 0.12); }
+
+    .effects-toggle-btn ha-icon:last-child { margin-left: auto; }
+
+    .effects-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .effect-btn {
+      padding: 7px 14px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 20px;
+      background: transparent;
+      color: var(--primary-text-color, #fff);
+      cursor: pointer;
+      font-size: 0.82em;
+      transition: background 0.1s, border-color 0.1s;
+    }
+
+    .effect-btn.active {
+      background: var(--amber-glow);
+      border-color: var(--amber-bright);
+    }
+
+    /* Modal actions */
     .color-modal-actions {
       display: flex;
       gap: 10px;
-      width: 100%;
     }
 
     .color-modal-cancel,
@@ -1241,9 +1896,7 @@ export class LightPanelCard extends LitElement {
       color: var(--secondary-text-color, rgba(255, 255, 255, 0.6));
     }
 
-    .color-modal-cancel:hover {
-      filter: brightness(1.3);
-    }
+    .color-modal-cancel:hover { filter: brightness(1.3); }
 
     .color-modal-apply {
       background: var(--amber-glow);
